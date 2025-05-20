@@ -1,0 +1,22 @@
+{
+  "name": "dipcatcher-bot",
+  "version": "1.0.0",
+  "description": "Um bot de trading automatizado para Binance que identifica quedas de X% em moedas resilientes e opera de forma segura com alvo de lucro de X% e stop loss de X%.",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "keywords": [],
+  "author": "AntunesDev",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.9.0",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.5.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AntunesDev/dipcatcher-bot.git"
+  },
+  "type": "module"
+}
