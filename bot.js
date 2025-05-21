@@ -1,11 +1,29 @@
 require('dotenv').config();
 const Binance = require('binance-api-node').default;
+const TelegramBot = require('node-telegram-bot-api');
 const { RSI } = require('technicalindicators');
 
+const {
+    BINANCE_API_KEY,
+    BINANCE_API_SECRET,
+    USE_TESTNET,
+    ENABLE_TELEGRAM,
+    TELEGRAM_TOKEN,
+    TELEGRAM_CHAT_ID,
+} = process.env;
+
 const client = Binance({
-    apiKey: process.env.BINANCE_API_KEY,
-    apiSecret: process.env.BINANCE_API_SECRET,
+    apiKey: BINANCE_API_KEY,
+    apiSecret: BINANCE_API_SECRET,
+    testnet: USE_TESTNET === 'true',
 });
+
+const bot = ENABLE_TELEGRAM === 'true' ? new TelegramBot(TELEGRAM_TOKEN, { polling: false }) : null;
+
+const notify = (msg) => {
+    console.log(msg);
+    if (bot) bot.sendMessage(TELEGRAM_CHAT_ID, msg).catch(console.error);
+};
 
 const USDT_PAIRS = [];
 const MIN_DROP_PERCENT = 10;
@@ -25,7 +43,7 @@ async function loadPairs() {
             USDT_PAIRS.push(symbol.symbol);
         }
     });
-    console.log(`Loaded ${USDT_PAIRS.length} USDT pairs.`);
+    notify(`Loaded ${USDT_PAIRS.length} USDT pairs.`);
 }
 
 async function checkDip(pair, interval) {
@@ -52,28 +70,38 @@ async function executeBuy(pair, amountUSDT) {
     const price = parseFloat((await client.prices({ symbol: pair }))[pair]);
     const qty = (amountUSDT / price).toFixed(8);
     await client.order({ symbol: pair, side: 'BUY', type: 'MARKET', quantity: qty });
-    console.log(`Compra ${pair}: ${qty}@${price}`);
+    notify(`🟢 Compra executada: ${pair}\nQuantidade: ${qty}\nPreço: ${price}`);
     return { price, qty };
 }
 
-async function executeSell(pair, qty, reason) {
+async function executeSell(pair, qty, reason, buyPrice) {
+    const sellPrice = parseFloat((await client.prices({ symbol: pair }))[pair]);
     await client.order({ symbol: pair, side: 'SELL', type: 'MARKET', quantity: qty });
-    console.log(`Venda ${pair}: ${qty} (${reason})`);
+    const profit = ((sellPrice - buyPrice) / buyPrice * 100).toFixed(2);
+    const result = profit >= 0 ? 'Lucro ✅' : 'Prejuízo ❌';
+    notify(`🔴 Venda executada (${reason}): ${pair}\nQuantidade: ${qty}\nPreço Venda: ${sellPrice}\nResultado: ${result} (${profit}%)`);
 }
 
 async function monitorTrade(pair, buyPrice, qty) {
     const tpPrice = buyPrice * (1 + TARGET_PROFIT_PERCENT / 100);
     const slPrice = buyPrice * (1 - STOP_LOSS_PERCENT / 100);
-    console.log(`${pair} TP:${tpPrice} SL:${slPrice}`);
+    notify(`${pair} ➡️ TP: ${tpPrice.toFixed(6)}, SL: ${slPrice.toFixed(6)}`);
 
     while (true) {
-        const currentPrice = parseFloat((await client.prices({ symbol: pair }))[pair]);
+        const balances = await client.accountInfo();
+        const asset = pair.replace('USDT', '');
+        const assetBalance = balances.balances.find(b => b.asset === asset);
+        if (!assetBalance || parseFloat(assetBalance.free) < qty * 0.95) {
+            notify(`⚠️ Detecção de venda manual ou saldo insuficiente: ${pair}. Trade encerrado.`);
+            break;
+        }
 
+        const currentPrice = parseFloat((await client.prices({ symbol: pair }))[pair]);
         if (currentPrice >= tpPrice) {
-            await executeSell(pair, qty, 'Take Profit');
+            await executeSell(pair, qty, 'Take Profit', buyPrice);
             break;
         } else if (currentPrice <= slPrice) {
-            await executeSell(pair, qty, 'Stop Loss');
+            await executeSell(pair, qty, 'Stop Loss', buyPrice);
             break;
         }
         await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL));
@@ -84,6 +112,7 @@ async function monitorTrade(pair, buyPrice, qty) {
 async function checkBalance(amount) {
     const account = await client.accountInfo();
     const usdt = parseFloat(account.balances.find(b => b.asset === 'USDT').free);
+    if (usdt < amount) notify(`⚠️ Saldo insuficiente (USDT: ${usdt.toFixed(2)}).`);
     return usdt >= amount;
 }
 
@@ -100,15 +129,11 @@ async function main() {
                 const conditionsMet = await Promise.all([
                     checkDip(pair, interval),
                     checkVolume(pair, interval),
-                    checkRSI(pair, interval)
+                    checkRSI(pair, interval),
                 ]);
 
                 if (conditionsMet.every(c => c)) {
-                    const hasFunds = await checkBalance(TRADE_AMOUNT_USDT);
-                    if (!hasFunds) {
-                        console.log('Sem saldo suficiente.');
-                        return;
-                    }
+                    if (!(await checkBalance(TRADE_AMOUNT_USDT))) return;
 
                     const { price, qty } = await executeBuy(pair, TRADE_AMOUNT_USDT);
                     activeTrades[pair] = { price, qty };
