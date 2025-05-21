@@ -18,6 +18,5 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AntunesDev/dipcatcher-bot.git"
-  },
-  "type": "module"
+  }
 }
