@@ -147,4 +147,23 @@ async function main() {
     }, CHECK_INTERVAL);
 }
 
-main().catch(console.error);
+main().catch((err) => {
+    const msg = `🚨 Exceção capturada:\n${err.message}\n${err.stack}`;
+    console.error(msg);
+    if (bot) bot.sendMessage(TELEGRAM_CHAT_ID, msg).catch(console.error);
+    process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+    const msg = `🚨 Exceção não capturada:\n${err.message}\n${err.stack}`;
+    console.error(msg);
+    if (bot) bot.sendMessage(TELEGRAM_CHAT_ID, msg).catch(console.error);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+    const msg = `🚨 Rejeição não tratada:\n${reason}`;
+    console.error(msg);
+    if (bot) bot.sendMessage(TELEGRAM_CHAT_ID, msg).catch(console.error);
+    process.exit(1);
+});
