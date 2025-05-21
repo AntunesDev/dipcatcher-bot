@@ -1,15 +1,71 @@
-# DipCatcher Bot 🪙📉
+# 📈 DipCatcher Bot
 
-Um bot de trading automatizado para Binance que identifica quedas de 10% em moedas resilientes e opera de forma segura com alvo de lucro de X% e stop loss de Y%.
+Um bot de trading automatizado para Binance que identifica oportunidades de compra em criptomoedas que sofreram quedas significativas em curtos intervalos, usando análises técnicas para maximizar ganhos e gerenciar riscos.
 
-## Funcionalidades
+## ⚙️ Tecnologias Utilizadas
 
-- Compra automática ao detectar queda de X% + histórico de recuperação
-- Venda automática com +X% de lucro ou Y% de prejuízo
-- Histórico de trades salvo localmente
-- Modo real com API da Binance
-- Modo simulador (backtest) com CSVs históricos
+- **Node.js**
+- **Binance API Node** (`binance-api-node`)
+- **Technical Indicators** (`technicalindicators`)
+- **Dotenv** para gerenciamento de variáveis de ambiente
 
----
+## 🚀 Funcionalidades
 
-⚠️ Aviso: Este projeto é experimental e não é uma recomendação de investimento. Use por sua conta e risco.
+- **Monitoramento de mercado:** verifica múltiplos pares USDT em diferentes intervalos (5m, 15m, 30m e 1h).
+- **Validação técnica:** usa RSI (Relative Strength Index), volume acima da média e quedas acentuadas como critérios de entrada.
+- **Gerenciamento de trades:** realiza operações simultâneas limitadas com controle de saldo disponível.
+- **Gerenciamento de risco:** aplica stop loss e take profit pré-configurados automaticamente.
+
+## 📌 Pré-requisitos
+
+- Conta na Binance com saldo em USDT
+- API Key e API Secret configuradas com permissão para trading na Binance
+- Node.js instalado
+
+## 🛠️ Instalação
+
+Clone o repositório:
+
+```bash
+git clone https://github.com/AntunesDev/dipcatcher-bot.git
+cd dipcatcher-bot
+```
+
+Instale as dependências:
+
+```bash
+npm install binance-api-node technicalindicators dotenv
+```
+
+Crie um arquivo `.env` na raiz do projeto:
+
+```env
+BINANCE_API_KEY=SuaAPIKey
+BINANCE_API_SECRET=SuaAPISecret
+```
+
+## ▶️ Execução
+
+Inicie o bot com o seguinte comando:
+
+```bash
+node index.js
+```
+
+## 🔄 Configurações
+
+Edite os seguintes parâmetros diretamente no script para ajustar seu bot:
+
+- `MIN_DROP_PERCENT`: Percentual mínimo de queda para considerar compra.
+- `TARGET_PROFIT_PERCENT`: Percentual de lucro alvo para vendas.
+- `STOP_LOSS_PERCENT`: Percentual máximo aceitável para perda.
+- `TRADE_AMOUNT_USDT`: Quantidade em USDT para cada operação.
+- `MAX_CONCURRENT_TRADES`: Número máximo de trades simultâneos.
+
+## ⚠️ Aviso de Risco
+
+Este bot automatiza operações financeiras e pode resultar em perdas substanciais. Utilize com responsabilidade e faça testes adequados antes de operar com valores significativos. O uso deste software é inteiramente sob sua responsabilidade.
+
+## 📜 Licença
+
+Este projeto é de código aberto e pode ser utilizado conforme a licença MIT.
