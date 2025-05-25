@@ -29,16 +29,21 @@ const USDT_PAIRS = [];
 const MIN_DROP_PERCENT = 10;
 const TARGET_PROFIT_PERCENT = 1.5;
 const STOP_LOSS_PERCENT = TARGET_PROFIT_PERCENT / 2;
-const CHECK_INTERVAL = 60 * 1000;
+const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutos
 const MAX_CONCURRENT_TRADES = 5;
 const TRADE_AMOUNT_USDT = 12;
-
-const intervals = ['5m', '15m', '30m', '1h'];
+const PAIRS_PER_CYCLE = 10;
+const INTERVALS = ['15m', '30m'];
 let activeTrades = {};
 let wsPriceWatchers = {};
 
 let lastHeartbeat = 0;
 const HEARTBEAT_INTERVAL = 10 * 60 * 1000;
+
+function getRandomPairs(pairs, n) {
+    const shuffled = pairs.slice().sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, n);
+}
 
 async function loadPairs() {
     const exchangeInfo = await client.exchangeInfo();
@@ -152,10 +157,11 @@ async function main() {
 
         if (Object.keys(activeTrades).length >= MAX_CONCURRENT_TRADES) return;
 
-        for (let pair of USDT_PAIRS) {
-            if (activeTrades[pair]) continue;
+        const pairsToCheck = getRandomPairs(USDT_PAIRS, PAIRS_PER_CYCLE);
 
-            for (let interval of intervals) {
+        for (let pair of pairsToCheck) {
+            if (activeTrades[pair]) continue;
+            for (let interval of INTERVALS) {
                 const [dipped, highVolume, oversoldRSI] = await Promise.all([
                     checkDip(pair, interval),
                     checkVolume(pair, interval),
@@ -171,7 +177,6 @@ async function main() {
                     break;
                 }
             }
-
             if (Object.keys(activeTrades).length >= MAX_CONCURRENT_TRADES) break;
         }
     }, CHECK_INTERVAL);
@@ -183,15 +188,28 @@ main().catch((err) => {
     if (bot) bot.sendMessage(TELEGRAM_CHAT_ID, msg).catch(console.error);
 });
 
-process.on('uncaughtException', (err) => {
+process.on('uncaughtException', async (err) => {
     const msg = `🚨 Exceção não capturada:\n${err.message}\n${err.stack}`;
     console.error(msg);
-    if (bot) bot.sendMessage(TELEGRAM_CHAT_ID, msg).catch(console.error);
+    if (bot && TELEGRAM_CHAT_ID) {
+        try {
+            await bot.sendMessage(TELEGRAM_CHAT_ID, msg);
+        } catch (e) {
+            console.error('Falha ao enviar exceção ao Telegram:', e.message);
+        }
+    }
     process.exit(1);
 });
-process.on('unhandledRejection', (reason) => {
+
+process.on('unhandledRejection', async (reason) => {
     const msg = `🚨 Rejeição não tratada:\n${reason}`;
     console.error(msg);
-    if (bot) bot.sendMessage(TELEGRAM_CHAT_ID, msg).catch(console.error);
+    if (bot && TELEGRAM_CHAT_ID) {
+        try {
+            await bot.sendMessage(TELEGRAM_CHAT_ID, msg);
+        } catch (e) {
+            console.error('Falha ao enviar rejeição ao Telegram:', e.message);
+        }
+    }
     process.exit(1);
 });
