@@ -37,6 +37,9 @@ const intervals = ['5m', '15m', '30m', '1h'];
 let activeTrades = {};
 let wsPriceWatchers = {};
 
+let lastHeartbeat = 0;
+const HEARTBEAT_INTERVAL = 10 * 60 * 1000;
+
 async function loadPairs() {
     const exchangeInfo = await client.exchangeInfo();
     exchangeInfo.symbols.forEach((symbol) => {
@@ -138,8 +141,15 @@ function monitorTradeWebSocket(pair, buyPrice, qty) {
 
 async function main() {
     await loadPairs();
+    notify(`🚀 dipcatcher-bot iniciado! Pronto para operar.\nPermitindo até ${MAX_CONCURRENT_TRADES} trades simultâneos.`);
 
     setInterval(async () => {
+        const now = Date.now();
+        if (now - lastHeartbeat > HEARTBEAT_INTERVAL) {
+            lastHeartbeat = now;
+            notify(`🤖 dipcatcher-bot rodando...\nTrades ativos: ${Object.keys(activeTrades).length}/${MAX_CONCURRENT_TRADES}\nAguardando oportunidades...`);
+        }
+
         if (Object.keys(activeTrades).length >= MAX_CONCURRENT_TRADES) return;
 
         for (let pair of USDT_PAIRS) {
