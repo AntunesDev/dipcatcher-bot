@@ -30,11 +30,12 @@ const MIN_DROP_PERCENT = 10;
 const TARGET_PROFIT_PERCENT = 1.5;
 const STOP_LOSS_PERCENT = TARGET_PROFIT_PERCENT / 2;
 const CHECK_INTERVAL = 60 * 1000;
-const MAX_CONCURRENT_TRADES = 2;
+const MAX_CONCURRENT_TRADES = 5;
 const TRADE_AMOUNT_USDT = 12;
 
 const intervals = ['5m', '15m', '30m', '1h'];
 let activeTrades = {};
+let wsPriceWatchers = {};
 
 async function loadPairs() {
     const exchangeInfo = await client.exchangeInfo();
@@ -67,7 +68,8 @@ async function checkRSI(pair, interval) {
 }
 
 async function executeBuy(pair, amountUSDT) {
-    const price = parseFloat((await client.prices({ symbol: pair }))[pair]);
+    const prices = await client.prices();
+    const price = parseFloat(prices[pair]);
     const qty = (amountUSDT / price).toFixed(8);
     await client.order({ symbol: pair, side: 'BUY', type: 'MARKET', quantity: qty });
     notify(`🟢 Compra executada: ${pair}\nQuantidade: ${qty}\nPreço: ${price}`);
@@ -75,38 +77,12 @@ async function executeBuy(pair, amountUSDT) {
 }
 
 async function executeSell(pair, qty, reason, buyPrice) {
-    const sellPrice = parseFloat((await client.prices({ symbol: pair }))[pair]);
+    const prices = await client.prices();
+    const sellPrice = parseFloat(prices[pair]);
     await client.order({ symbol: pair, side: 'SELL', type: 'MARKET', quantity: qty });
     const profit = ((sellPrice - buyPrice) / buyPrice * 100).toFixed(2);
     const result = profit >= 0 ? 'Lucro ✅' : 'Prejuízo ❌';
     notify(`🔴 Venda executada (${reason}): ${pair}\nQuantidade: ${qty}\nPreço Venda: ${sellPrice}\nResultado: ${result} (${profit}%)`);
-}
-
-async function monitorTrade(pair, buyPrice, qty) {
-    const tpPrice = buyPrice * (1 + TARGET_PROFIT_PERCENT / 100);
-    const slPrice = buyPrice * (1 - STOP_LOSS_PERCENT / 100);
-    notify(`${pair} ➡️ TP: ${tpPrice.toFixed(6)}, SL: ${slPrice.toFixed(6)}`);
-
-    while (true) {
-        const balances = await client.accountInfo();
-        const asset = pair.replace('USDT', '');
-        const assetBalance = balances.balances.find(b => b.asset === asset);
-        if (!assetBalance || parseFloat(assetBalance.free) < qty * 0.95) {
-            notify(`⚠️ Detecção de venda manual ou saldo insuficiente: ${pair}. Trade encerrado.`);
-            break;
-        }
-
-        const currentPrice = parseFloat((await client.prices({ symbol: pair }))[pair]);
-        if (currentPrice >= tpPrice) {
-            await executeSell(pair, qty, 'Take Profit', buyPrice);
-            break;
-        } else if (currentPrice <= slPrice) {
-            await executeSell(pair, qty, 'Stop Loss', buyPrice);
-            break;
-        }
-        await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL));
-    }
-    delete activeTrades[pair];
 }
 
 async function checkBalance(amount) {
@@ -114,6 +90,50 @@ async function checkBalance(amount) {
     const usdt = parseFloat(account.balances.find(b => b.asset === 'USDT').free);
     if (usdt < amount) notify(`⚠️ Saldo insuficiente (USDT: ${usdt.toFixed(2)}).`);
     return usdt >= amount;
+}
+
+async function stillHolding(pair, qty) {
+    const account = await client.accountInfo();
+    const asset = pair.replace('USDT', '');
+    const assetBalance = account.balances.find(b => b.asset === asset);
+    return assetBalance && parseFloat(assetBalance.free) >= qty * 0.95;
+}
+
+function monitorTradeWebSocket(pair, buyPrice, qty) {
+    const tpPrice = buyPrice * (1 + TARGET_PROFIT_PERCENT / 100);
+    const slPrice = buyPrice * (1 - STOP_LOSS_PERCENT / 100);
+    notify(`${pair} ➡️ TP: ${tpPrice.toFixed(6)}, SL: ${slPrice.toFixed(6)}`);
+
+    if (wsPriceWatchers[pair]) wsPriceWatchers[pair]();
+
+    wsPriceWatchers[pair] = client.ws.ticker(pair, async (ticker) => {
+        try {
+            const currentPrice = parseFloat(ticker.close);
+
+            const has = await stillHolding(pair, qty);
+            if (!has) {
+                notify(`⚠️ Detecção de venda manual ou saldo insuficiente: ${pair}. Trade encerrado.`);
+                wsPriceWatchers[pair] && wsPriceWatchers[pair]();
+                delete wsPriceWatchers[pair];
+                delete activeTrades[pair];
+                return;
+            }
+
+            if (currentPrice >= tpPrice) {
+                await executeSell(pair, qty, 'Take Profit', buyPrice);
+                wsPriceWatchers[pair] && wsPriceWatchers[pair]();
+                delete wsPriceWatchers[pair];
+                delete activeTrades[pair];
+            } else if (currentPrice <= slPrice) {
+                await executeSell(pair, qty, 'Stop Loss', buyPrice);
+                wsPriceWatchers[pair] && wsPriceWatchers[pair]();
+                delete wsPriceWatchers[pair];
+                delete activeTrades[pair];
+            }
+        } catch (err) {
+            notify(`🚨 Erro monitorando preço de ${pair}: ${err.message}`);
+        }
+    });
 }
 
 async function main() {
@@ -126,18 +146,18 @@ async function main() {
             if (activeTrades[pair]) continue;
 
             for (let interval of intervals) {
-                const conditionsMet = await Promise.all([
+                const [dipped, highVolume, oversoldRSI] = await Promise.all([
                     checkDip(pair, interval),
                     checkVolume(pair, interval),
                     checkRSI(pair, interval),
                 ]);
 
-                if (conditionsMet.every(c => c)) {
+                if (dipped && highVolume && oversoldRSI) {
                     if (!(await checkBalance(TRADE_AMOUNT_USDT))) return;
 
                     const { price, qty } = await executeBuy(pair, TRADE_AMOUNT_USDT);
                     activeTrades[pair] = { price, qty };
-                    monitorTrade(pair, price, qty);
+                    monitorTradeWebSocket(pair, price, qty);
                     break;
                 }
             }
@@ -148,10 +168,9 @@ async function main() {
 }
 
 main().catch((err) => {
-    const msg = `🚨 Exceção capturada:\n${err.message}\n${err.stack}`;
+    const msg = `🚨 Exceção não capturada em main():\n${err.message}\n${err.stack}`;
     console.error(msg);
     if (bot) bot.sendMessage(TELEGRAM_CHAT_ID, msg).catch(console.error);
-    process.exit(1);
 });
 
 process.on('uncaughtException', (err) => {
@@ -160,7 +179,6 @@ process.on('uncaughtException', (err) => {
     if (bot) bot.sendMessage(TELEGRAM_CHAT_ID, msg).catch(console.error);
     process.exit(1);
 });
-
 process.on('unhandledRejection', (reason) => {
     const msg = `🚨 Rejeição não tratada:\n${reason}`;
     console.error(msg);
